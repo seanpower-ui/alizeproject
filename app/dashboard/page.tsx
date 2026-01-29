@@ -5244,27 +5244,13 @@ function DashboardPage({
               ) : (
               <div className="flex-1 overflow-hidden flex flex-col min-h-0">
                 {currentView === "calendar" && activePage === "Upcoming visits" ? (
-                  (() => {
-                    const isScrollableContentOnly = activePage === "Tasks" || activePage === "Upcoming visits" || activePage === "Upcoming reservations";
-                    return isScrollableContentOnly ? (
-                      <div className="flex-1 overflow-y-auto min-h-0">
-                        <VisitorsCalendar />
-                      </div>
-                    ) : (
-                      <VisitorsCalendar />
-                    );
-                  })()
+                  <div className="flex-1 overflow-y-auto min-h-0">
+                    <VisitorsCalendar />
+                  </div>
                 ) : currentView === "calendar" && activePage === "Upcoming reservations" ? (
-                  (() => {
-                    const isScrollableContentOnly = activePage === "Tasks" || activePage === "Upcoming visits" || activePage === "Upcoming reservations";
-                    return isScrollableContentOnly ? (
-                      <div className="flex-1 overflow-y-auto min-h-0">
-                        <ReservationsCalendar />
-                      </div>
-                    ) : (
-                      <ReservationsCalendar />
-                    );
-                  })()
+                  <div className="flex-1 overflow-y-auto min-h-0">
+                    <ReservationsCalendar />
+                  </div>
                 ) : currentView === "tile" ? (
                   <div className="flex-1 overflow-y-auto min-h-0">
                     <div
