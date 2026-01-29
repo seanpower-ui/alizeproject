@@ -1,4 +1,4 @@
 @jllt:registry=https://artifacts.jll.com/artifactory/api/npm/jllt-npm-release/
-//artifacts.jll.com/artifactory/api/npm/jllt-npm-release/:_authToken=YOUR_AUTH_TOKEN_HERE
+//artifacts.jll.com/artifactory/api/npm/jllt-npm-release/:_authToken=${NPM_TOKEN}
 always-auth=true
 legacy-peer-deps=true
