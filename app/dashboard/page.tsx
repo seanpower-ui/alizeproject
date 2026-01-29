@@ -5,6 +5,7 @@ import { useTheme } from "next-themes";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
 import {
   Accordion,
   AccordionContent,
@@ -130,6 +131,8 @@ export type WorkOrderItem = {
   tasks: number;
   files: number;
   type?: string;
+  /** When true, tile uses fixed height so all created work orders stay consistent (persisted with list) */
+  createdViaModal?: boolean;
 };
 
 export type CreatedVisitorItem = {
@@ -3922,10 +3925,13 @@ function DashboardPage({
                 </nav>
               </div>
             )}
-            <main className="pt-6 px-6 pb-6 flex-1 flex flex-col overflow-y-auto min-h-0 bg-semantic-surface-overlays-level1">
+            {(() => {
+              const isScrollableContentOnly = activePage === "Tasks" || activePage === "Upcoming visits" || activePage === "Upcoming reservations";
+              return (
+            <main className={`pt-6 px-6 pb-6 flex-1 flex flex-col min-h-0 bg-semantic-surface-overlays-level1 ${isScrollableContentOnly ? "overflow-hidden" : "overflow-y-auto"}`}>
               <div 
                 key={activePage}
-                className="flex-1 flex flex-col animate-in"
+                className={`flex-1 flex flex-col animate-in ${isScrollableContentOnly ? "min-h-0" : ""}`}
               >
                 {/* Page Header */}
                 <div className="flex items-center justify-between mb-6">
@@ -5236,11 +5242,29 @@ function DashboardPage({
                   </div>
                 </div>
               ) : (
-              <div className="flex-1 overflow-hidden flex flex-col">
+              <div className="flex-1 overflow-hidden flex flex-col min-h-0">
                 {currentView === "calendar" && activePage === "Upcoming visits" ? (
-                  <VisitorsCalendar />
+                  (() => {
+                    const isScrollableContentOnly = activePage === "Tasks" || activePage === "Upcoming visits" || activePage === "Upcoming reservations";
+                    return isScrollableContentOnly ? (
+                      <div className="flex-1 overflow-y-auto min-h-0">
+                        <VisitorsCalendar />
+                      </div>
+                    ) : (
+                      <VisitorsCalendar />
+                    );
+                  })()
                 ) : currentView === "calendar" && activePage === "Upcoming reservations" ? (
-                  <ReservationsCalendar />
+                  (() => {
+                    const isScrollableContentOnly = activePage === "Tasks" || activePage === "Upcoming visits" || activePage === "Upcoming reservations";
+                    return isScrollableContentOnly ? (
+                      <div className="flex-1 overflow-y-auto min-h-0">
+                        <ReservationsCalendar />
+                      </div>
+                    ) : (
+                      <ReservationsCalendar />
+                    );
+                  })()
                 ) : currentView === "tile" ? (
                   <div className="flex-1 overflow-y-auto min-h-0">
                     <div
@@ -5415,7 +5439,7 @@ function DashboardPage({
                                 }
                                 setIsViewVisitorModalOpen(true);
                               } : undefined}
-                              fixedHeight={activePage === "Upcoming visits" && workOrder.id === lastCreatedVisitorId ? 214 : activePage !== "Upcoming visits" && workOrder.id === lastCreatedWorkOrderId ? 322 : undefined}
+                              fixedHeight={activePage === "Upcoming visits" && workOrder.id === lastCreatedVisitorId ? 214 : activePage !== "Upcoming visits" && (workOrder.createdViaModal === true || workOrder.id === lastCreatedWorkOrderId) ? 322 : undefined}
                             />
                           </div>
                         );
@@ -5424,7 +5448,8 @@ function DashboardPage({
                   </div>
                 ) : (
                   (() => {
-                    return (
+                    const isScrollableContentOnly = activePage === "Tasks" || activePage === "Upcoming visits" || activePage === "Upcoming reservations";
+                    const table = (
                       <WorkOrdersTable 
                         workOrders={filteredAndSortedWorkOrders} 
                         sortState={selectedSorts}
@@ -5480,12 +5505,18 @@ function DashboardPage({
                         } : undefined}
                       />
                     );
+                    return isScrollableContentOnly ? (
+                      <div className="flex-1 overflow-y-auto min-h-0">
+                        {table}
+                      </div>
+                    ) : table;
                   })()
                 )}
               </div>
               )}
               </div>
             </main>
+            ); })()}
           </SidebarInset>
         </div>
       </div>
@@ -6519,9 +6550,15 @@ function DashboardPage({
                       comments: 0,
                       tasks: 0,
                       files: 0,
+                      createdViaModal: true,
                     };
                     setWorkOrdersList((prev) => [newWorkOrder, ...prev]);
                     setLastCreatedWorkOrderId(newWorkOrder.id);
+                    (() => {
+                      const now = new Date();
+                      const timeStr = `${(now.getHours() % 12) || 12}:${String(now.getMinutes()).padStart(2, "0")} ${now.getHours() >= 12 ? "PM" : "AM"}`;
+                      toast.success("Work order created", { description: `${formatDate(now)} - ${timeStr}` });
+                    })();
                   } else if (modalType === "visitor") {
                     const visitorId = "V-" + Date.now();
                     const dateDisplay = visitDateStart
@@ -6547,6 +6584,11 @@ function DashboardPage({
                     };
                     setCreatedVisitorsList((prev) => [newVisitor, ...prev]);
                     setLastCreatedVisitorId(visitorId);
+                    (() => {
+                      const now = new Date();
+                      const timeStr = `${(now.getHours() % 12) || 12}:${String(now.getMinutes()).padStart(2, "0")} ${now.getHours() >= 12 ? "PM" : "AM"}`;
+                      toast.success("Visitor created", { description: `${formatDate(now)} - ${timeStr}` });
+                    })();
                   } else if (modalType === "reservation" && selectedReservation) {
                     const reservationId = "R-" + Date.now();
                     const dateDisplay = visitDateStart
