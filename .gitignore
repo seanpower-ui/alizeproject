@@ -40,8 +40,7 @@ next-env.d.ts
 *.swo
 *~
 
-# Sensitive files
-.npmrc
+# Sensitive files (keep .npmrc committed - it only references ${NPM_TOKEN}; set NPM_TOKEN in CI/Vercel)
 
 # OS
 .DS_Store
