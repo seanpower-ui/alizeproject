@@ -55,8 +55,7 @@ import {
   TooltipTrigger,
 } from "@jllt/alize-ui";
 import { sidebarMenuItems, getSidebarSubItemLabel } from "@/lib/sidebar-menu";
-
-const CREATED_WORK_ORDERS_KEY = "alize-created-work-orders";
+import { ALIZE_WORK_ORDERS_KEY, resetApp } from "@/lib/app-persistence";
 
 type WorkOrderRecord = {
   id: string;
@@ -165,10 +164,10 @@ export default function WorkOrderDetailsPage() {
     setMounted(true);
   }, []);
 
-  // Merge in work orders created on dashboard so detail page can show them
+  // Merge in work orders created on dashboard (persisted in localStorage) so detail page can show them
   useEffect(() => {
     try {
-      const raw = typeof sessionStorage !== "undefined" ? sessionStorage.getItem(CREATED_WORK_ORDERS_KEY) : null;
+      const raw = typeof localStorage !== "undefined" ? localStorage.getItem(ALIZE_WORK_ORDERS_KEY) : null;
       if (raw) {
         const created: WorkOrderRecord[] = JSON.parse(raw);
         setWorkOrdersList((prev) => {
@@ -181,31 +180,6 @@ export default function WorkOrderDetailsPage() {
       // ignore
     }
     setHasCheckedStorage(true);
-  }, [workOrderId]);
-
-  // When leaving this details page, if viewing a modal-created work order, remove it from sessionStorage
-  // so details navigation is only for the original 2 work orders
-  useEffect(() => {
-    const id = workOrderId;
-    const isCreated = !initialWorkOrders.some((wo) => wo.id === id);
-    return () => {
-      if (isCreated && typeof sessionStorage !== "undefined") {
-        try {
-          const raw = sessionStorage.getItem(CREATED_WORK_ORDERS_KEY);
-          if (raw) {
-            const list: WorkOrderRecord[] = JSON.parse(raw);
-            const filtered = list.filter((wo) => wo.id !== id);
-            if (filtered.length === 0) {
-              sessionStorage.removeItem(CREATED_WORK_ORDERS_KEY);
-            } else {
-              sessionStorage.setItem(CREATED_WORK_ORDERS_KEY, JSON.stringify(filtered));
-            }
-          }
-        } catch {
-          // ignore
-        }
-      }
-    };
   }, [workOrderId]);
 
   // Sidebar state - persist open groups in localStorage
@@ -458,6 +432,13 @@ export default function WorkOrderDetailsPage() {
                 <DropdownMenuItem variant="destructive">
                   <MaterialSymbol name="logout" size={16} className="mr-2" />
                   Sign out
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={() => resetApp()}
+                >
+                  <MaterialSymbol name="restart_alt" size={16} className="mr-2" />
+                  Reset App
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

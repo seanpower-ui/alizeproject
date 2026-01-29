@@ -94,6 +94,12 @@ import {
   TooltipTrigger,
 } from "@jllt/alize-ui";
 import { sidebarMenuItems, getSidebarSubItemLabel } from "@/lib/sidebar-menu";
+import {
+  ALIZE_WORK_ORDERS_KEY,
+  ALIZE_VISITORS_KEY,
+  ALIZE_RESERVATIONS_KEY,
+  resetApp,
+} from "@/lib/app-persistence";
 
 // Helper function to format date as MM/DD/YYYY
 const formatDate = (date: Date): string => {
@@ -125,6 +131,77 @@ export type WorkOrderItem = {
   files: number;
   type?: string;
 };
+
+export type CreatedVisitorItem = {
+  id: string;
+  created: string;
+  visitorName: string;
+  hostName: string;
+  visitorBadges: { first: string; second: string };
+  date: string;
+  time: string;
+  property: string;
+  email: string;
+  phone: string;
+};
+
+function createdVisitorToWorkOrder(v: CreatedVisitorItem): WorkOrderItem {
+  return {
+    id: v.id,
+    title: "Visit",
+    category: "Visit",
+    type: "Visit",
+    priority: "Medium",
+    status: "Scheduled",
+    assignee: v.hostName,
+    created: v.date,
+    property: v.property,
+    description: "",
+    icon: "person",
+    attachments: 0,
+    comments: 0,
+    tasks: 0,
+    files: 0,
+  };
+}
+
+export type CreatedReservationItem = {
+  id: string;
+  /** User-provided title for the reservation tile; falls back to roomName if not set (e.g. from older sessionStorage) */
+  reservationName?: string;
+  roomName: string;
+  date: string;
+  timeSlot: string;
+  location: string;
+  capacity: number;
+  price: string;
+  created: string;
+  property: string;
+  reservationDetails: string;
+};
+
+/** Placeholder tile and view-reservation description for reservation schedule page (business meeting example) */
+const RESERVATION_PLACEHOLDER_DESCRIPTION = "Business meeting to discuss quarterly strategy, review performance metrics, and plan upcoming initiatives with key stakeholders.";
+
+function createdReservationToWorkOrder(r: CreatedReservationItem): WorkOrderItem {
+  return {
+    id: r.id,
+    title: r.reservationName ?? r.roomName,
+    category: "Reservation",
+    type: "Reservation",
+    priority: "Medium",
+    status: "Confirmed",
+    assignee: "",
+    created: r.created,
+    property: r.property,
+    description: r.reservationDetails || "",
+    icon: "meeting_room",
+    attachments: 0,
+    comments: 0,
+    tasks: 0,
+    files: 0,
+  };
+}
 
 const initialWorkOrders: WorkOrderItem[] = [
   {
@@ -205,12 +282,13 @@ function formatTimeUS(time24: string) {
   return `${hour12}:${minutes} ${ampm}`;
 }
 
-function WorkOrderCard({ workOrder, hideAssignee, visitorBadges, visitorName, hostName, cardIndex, isEmpty, onVisitorCardClick, descriptionHeight, fixedHeight }: { 
+function WorkOrderCard({ workOrder, hideAssignee, visitorBadges, visitorName, hostName, visitorTime, cardIndex, isEmpty, onVisitorCardClick, descriptionHeight, fixedHeight }: { 
   workOrder: WorkOrderItem; 
   hideAssignee?: boolean;
   visitorBadges?: { first: string; second: string };
   visitorName?: string;
   hostName?: string;
+  visitorTime?: string;
   cardIndex?: number;
   isEmpty?: boolean;
   onVisitorCardClick?: (workOrder: WorkOrderItem) => void;
@@ -346,7 +424,7 @@ function WorkOrderCard({ workOrder, hideAssignee, visitorBadges, visitorName, ho
           </div>
           <div>
             <p className="text-xs text-muted-foreground">{visitorBadges ? "Time" : "Property"}</p>
-            <p className="text-sm font-medium truncate">{visitorBadges ? "9:00 AM - 5:00 PM" : workOrder.property}</p>
+            <p className="text-sm font-medium truncate">{visitorBadges ? (visitorTime ?? "9:00 AM - 5:00 PM") : workOrder.property}</p>
           </div>
         </div>
 
@@ -450,15 +528,30 @@ function WorkOrderCard({ workOrder, hideAssignee, visitorBadges, visitorName, ho
 function ReservationCard({ 
   workOrder, 
   reservationData,
+  resourceNameOverride,
+  statusOverride,
+  descriptionOverride,
+  fixedHeight,
   onClick
 }: { 
   workOrder: WorkOrderItem; 
   reservationData?: { floor?: string; suite?: string; date?: string; time?: string };
+  /** When set (e.g. for placeholder tile), use this for the resource badge and event title instead of workOrder.title */
+  resourceNameOverride?: string;
+  /** When set (e.g. "Past"), use this for the status badge instead of workOrder.status */
+  statusOverride?: string;
+  /** When set (e.g. for reservation schedule placeholder), use this for the description instead of workOrder.description */
+  descriptionOverride?: string;
+  /** When set (e.g. 332), the card uses this height to match the schedule placeholder tile */
+  fixedHeight?: number;
   onClick?: () => void;
 }) {
+  const resourceName = resourceNameOverride ?? (workOrder.category === "Reservation" ? workOrder.title : null) ?? workOrder.title;
+  const statusDisplay = statusOverride ?? workOrder.status;
   return (
     <Card 
-      className={`flex flex-col gap-4 h-fit py-3 ${onClick ? "cursor-pointer border border-transparent hover:border-semantic-stroke-subdued transition-colors" : ""}`}
+      className={`flex flex-col gap-4 py-3 ${fixedHeight ? "" : "h-fit"} ${onClick ? "cursor-pointer border border-transparent hover:border-semantic-stroke-subdued transition-colors" : ""}`}
+      style={fixedHeight ? { height: fixedHeight } : undefined}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest('button')) return;
         onClick?.();
@@ -471,17 +564,29 @@ function ReservationCard({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Badge variant="default">
-                  {workOrder.status}
+                  {statusDisplay}
                 </Badge>
               </TooltipTrigger>
               <TooltipContent>Status</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Badge tonal="sand">
-                  <MaterialSymbol name="meeting_room" size={14} className="mr-1.5" />
-                  Sand Room
-                </Badge>
+                {resourceName === "Sand Room" ? (
+                  <Badge tonal="sand">
+                    <MaterialSymbol name="meeting_room" size={14} className="mr-1.5" />
+                    Sand Room
+                  </Badge>
+                ) : resourceName === "Sky Room" ? (
+                  <Badge tonal="science">
+                    <MaterialSymbol name="meeting_room" size={14} className="mr-1.5" />
+                    Sky Room
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="bg-[#F4EDEA] text-foreground border-0 hover:bg-[#F4EDEA]">
+                    <MaterialSymbol name="meeting_room" size={14} className="mr-1.5" />
+                    {resourceName || "Reservation"}
+                  </Badge>
+                )}
               </TooltipTrigger>
               <TooltipContent>Resource name</TooltipContent>
             </Tooltip>
@@ -491,7 +596,7 @@ function ReservationCard({
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="flex-1 space-y-4 p-3 py-0">
+      <CardContent className="flex flex-col flex-1 min-h-0 space-y-4 p-3 py-0">
         {/* Reservation Info */}
         <div className="flex items-start gap-3">
           <div className="rounded-lg bg-muted flex items-center justify-center" style={{ height: 60, width: 60, minWidth: 60, minHeight: 60 }}>
@@ -499,7 +604,7 @@ function ReservationCard({
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs text-muted-foreground">{workOrder.id.startsWith('R') ? workOrder.id : (workOrder.id.startsWith('W-') ? workOrder.id.replace(/^W-/, 'R-') : 'R' + workOrder.id.slice(1))}</p>
-            <h3 className="font-semibold text-base">All Day event</h3>
+            <h3 className="font-semibold text-base">{workOrder.category === "Reservation" ? workOrder.title : "All Day event"}</h3>
             <p className="text-sm text-muted-foreground">Starbucks</p>
           </div>
         </div>
@@ -522,13 +627,13 @@ function ReservationCard({
         <div>
           <p className="text-xs text-muted-foreground">Description</p>
           <p className="text-sm text-foreground line-clamp-3">
-            Business meeting to discuss quarterly strategy, review performance metrics, and plan upcoming initiatives with key stakeholders.
+            {descriptionOverride ?? (workOrder.description?.trim() || RESERVATION_PLACEHOLDER_DESCRIPTION)}
           </p>
         </div>
 
-        {/* Reservation Date & Time Footer */}
+        {/* Reservation Date & Time Footer - hug bottom left */}
         {reservationData && (reservationData.date || reservationData.time) && (
-          <div className="flex items-center gap-4 pt-2">
+          <div className="flex items-center gap-4 pt-2 mt-auto justify-start">
             {reservationData.date && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1100,6 +1205,7 @@ function WorkOrdersTable({
   onPageSizeChange,
   activePage,
   visitorData,
+  createdReservationsList,
   onVisitorRowClick,
   onReservationRowClick
 }: { 
@@ -1113,8 +1219,9 @@ function WorkOrdersTable({
   onPageChange: (page: number) => void;
   onPageSizeChange: (size: number) => void;
   activePage?: "Home" | "Tasks" | "Upcoming visits" | "Upcoming reservations" | "Create reservation";
-  visitorData?: Array<{ visitorName: string; hostName: string; visitorBadges: { first: string; second: string } }>;
-  onVisitorRowClick?: (workOrder: { created: string }) => void;
+  visitorData?: Array<{ visitorName: string; hostName: string; visitorBadges: { first: string; second: string }; time?: string }>;
+  createdReservationsList?: CreatedReservationItem[];
+  onVisitorRowClick?: (workOrder: { id: string; created: string }) => void;
   onReservationRowClick?: (workOrder: { id: string; created: string; property: string }) => void;
 }) {
   const router = useRouter();
@@ -1283,7 +1390,7 @@ function WorkOrdersTable({
         case 'date':
           return workOrder.created;
         case 'time':
-          return "9:00 AM - 5:00 PM";
+          return visitor.time ?? "9:00 AM - 5:00 PM";
         case 'property':
           return <span className="max-w-[150px] truncate block">{workOrder.property}</span>;
         case 'createdFor':
@@ -1295,16 +1402,35 @@ function WorkOrdersTable({
     
     // Reservation columns
     if (activePage === "Upcoming reservations") {
+      const createdRes = workOrder.id.startsWith("R-") && createdReservationsList
+        ? createdReservationsList.find((c) => c.id === workOrder.id)
+        : null;
+      const resourceName = createdRes ? createdRes.roomName : "Sand Room";
+      const reservationName = createdRes ? (createdRes.reservationName ?? createdRes.roomName) : "All Day event";
+      const timeDisplay = createdRes ? createdRes.timeSlot : "All Day";
+      const floorDisplay = createdRes
+        ? (createdRes.location.match(/Floor\s*(\d+)/i)?.[1] ?? "—")
+        : "4";
       switch (column) {
         case 'resId':
           return <span className="font-normal text-semantic-text-interaction-default underline">{workOrder.id.startsWith('R') ? workOrder.id : (workOrder.id.startsWith('W-') ? workOrder.id.replace(/^W-/, 'R-') : 'R' + workOrder.id.slice(1))}</span>;
         case 'reservationName':
-          return "All Day event";
+          return reservationName;
         case 'resourceName':
-          return (
+          return resourceName === "Sand Room" ? (
             <Badge tonal="sand">
               <MaterialSymbol name="meeting_room" size={14} className="mr-1.5" />
               Sand Room
+            </Badge>
+          ) : resourceName === "Sky Room" ? (
+            <Badge tonal="science">
+              <MaterialSymbol name="meeting_room" size={14} className="mr-1.5" />
+              Sky Room
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="bg-[#F4EDEA] text-foreground border-0 hover:bg-[#F4EDEA]">
+              <MaterialSymbol name="meeting_room" size={14} className="mr-1.5" />
+              {resourceName}
             </Badge>
           );
         case 'status':
@@ -1322,7 +1448,7 @@ function WorkOrdersTable({
         case 'date':
           return workOrder.created;
         case 'time':
-          return "All Day";
+          return timeDisplay;
         case 'company':
           return "Starbucks";
         case 'type':
@@ -1330,7 +1456,7 @@ function WorkOrdersTable({
         case 'property':
           return <span className="max-w-[150px] truncate block">{workOrder.property}</span>;
         case 'floor':
-          return "4";
+          return floorDisplay;
         default:
           return null;
       }
@@ -2410,8 +2536,8 @@ function CompactMultiSelect({
 // Order of validation fields per modal type – used to scroll to first/next error
 const MODAL_ERROR_FIELD_ORDER: Record<string, string[]> = {
   "work-order": ["issueType", "details", "property", "floor", "company", "requestedFor"],
-  visitor: ["visitorFirstName", "visitorLastName", "visitDateStart", "visitDateEnd", "visitTimeStart", "visitTimeEnd"],
-  reservation: ["visitDateStart", "visitDateEnd", "visitTimeStart", "visitTimeEnd", "reservationDetails"],
+  visitor: ["visitorFirstName", "visitorLastName", "visitDateStart", "visitDateEnd", "visitTimeStart", "visitTimeEnd", "property", "floor", "company", "requestedFor"],
+  reservation: ["reservationName", "visitDateStart", "visitDateEnd", "visitTimeStart", "visitTimeEnd", "reservationDetails"],
 };
 
 type ActivePage = "Home" | "Tasks" | "Upcoming visits" | "Upcoming reservations" | "Create reservation";
@@ -2423,15 +2549,81 @@ function DashboardPage({
   initialActivePage: ActivePage;
   searchParams: ReturnType<typeof useSearchParams>;
 }) {
-  // Work orders list (tiles + table) – new entries added when Create work order succeeds
-  const [workOrdersList, setWorkOrdersList] = useState<WorkOrderItem[]>(initialWorkOrders);
+  const router = useRouter();
+  // Work orders list (tiles + table) – persisted so new entries survive refresh
+  const [workOrdersList, setWorkOrdersList] = useState<WorkOrderItem[]>(() => {
+    if (typeof window === "undefined") return initialWorkOrders;
+    try {
+      const raw = localStorage.getItem(ALIZE_WORK_ORDERS_KEY);
+      if (!raw) return initialWorkOrders;
+      const parsed = JSON.parse(raw) as WorkOrderItem[];
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : initialWorkOrders;
+    } catch {
+      return initialWorkOrders;
+    }
+  });
   const [lastCreatedWorkOrderId, setLastCreatedWorkOrderId] = useState<string | null>(null);
+  const [lastCreatedVisitorId, setLastCreatedVisitorId] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(ALIZE_WORK_ORDERS_KEY, JSON.stringify(workOrdersList));
+      }
+    } catch {
+      // ignore
+    }
+  }, [workOrdersList]);
+
+  // Created visitors (Upcoming visits) – persisted so new entries survive refresh
+  const [createdVisitorsList, setCreatedVisitorsList] = useState<CreatedVisitorItem[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = localStorage.getItem(ALIZE_VISITORS_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(ALIZE_VISITORS_KEY, JSON.stringify(createdVisitorsList));
+      }
+    } catch {
+      // ignore
+    }
+  }, [createdVisitorsList]);
+
+  // Created reservations (Resource Reservations schedule) – persisted so new entries survive refresh
+  const [createdReservationsList, setCreatedReservationsList] = useState<CreatedReservationItem[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = localStorage.getItem(ALIZE_RESERVATIONS_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [lastCreatedReservationId, setLastCreatedReservationId] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(ALIZE_RESERVATIONS_KEY, JSON.stringify(createdReservationsList));
+      }
+    } catch {
+      // ignore
+    }
+  }, [createdReservationsList]);
 
   // Modal state for Create Work Order
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [modalType, setModalType] = useState<"work-order" | "visitor" | "reservation">("work-order");
   const [isViewVisitorModalOpen, setIsViewVisitorModalOpen] = useState(false);
   const [selectedViewVisitorCreated, setSelectedViewVisitorCreated] = useState<string | null>(null);
+  const [selectedViewVisitor, setSelectedViewVisitor] = useState<CreatedVisitorItem | null>(null);
   const [isViewReservationModalOpen, setIsViewReservationModalOpen] = useState(false);
   const [selectedReservationForView, setSelectedReservationForView] = useState<{
     roomName: string;
@@ -2441,6 +2633,8 @@ function DashboardPage({
     location: string;
     capacity: number;
     price: string;
+    /** Description shown in view reservation modal (e.g. reservationDetails or placeholder text) */
+    description?: string;
   } | null>(null);
   const [selectedReservation, setSelectedReservation] = useState<{
     roomName: string;
@@ -2454,6 +2648,7 @@ function DashboardPage({
   const [issueType, setIssueType] = useState("");
   const [details, setDetails] = useState("");
   const [reservationDetails, setReservationDetails] = useState("");
+  const [reservationName, setReservationName] = useState("");
   const [validationErrors, setValidationErrors] = useState<Record<string, boolean>>({});
   const modalContentScrollRef = useRef<HTMLDivElement>(null);
   const [isEditDetailsMode, setIsEditDetailsMode] = useState(false);
@@ -2522,6 +2717,17 @@ function DashboardPage({
       setCurrentView("tile");
     }
   }, [activePage, currentView]);
+
+  // When leaving the visitor area, remove the newly added visitor tile(s)
+  const prevActivePageRef = useRef<ActivePage | null>(null);
+  useEffect(() => {
+    const prev = prevActivePageRef.current;
+    prevActivePageRef.current = activePage;
+    if (prev === "Upcoming visits" && activePage !== "Upcoming visits") {
+      setCreatedVisitorsList([]);
+      setLastCreatedVisitorId(null);
+    }
+  }, [activePage]);
 
   // Set default starred filters for visitors page
   useEffect(() => {
@@ -2666,6 +2872,7 @@ function DashboardPage({
     setIssueType("");
     setDetails("");
     setReservationDetails("");
+    setReservationName("");
     setValidationErrors({});
     setCreateAnother(false);
     setVisitorToggle(false);
@@ -3245,19 +3452,23 @@ function DashboardPage({
     });
   };
 
-  // Filter and sort work orders
+  // Filter and sort work orders (for Upcoming visits: created visitors + 2 work orders; for Upcoming reservations: created reservations + work orders)
   const filteredAndSortedWorkOrders = (() => {
-    let result = [...workOrdersList];
-    
-    // For visitor page, show only 2 cards
+    let result: WorkOrderItem[];
     if (activePage === "Upcoming visits") {
-      result = result.slice(0, 2);
+      const visitorWorkOrders = createdVisitorsList.map(createdVisitorToWorkOrder);
+      const workOrdersSlice = workOrdersList.slice(0, 2);
+      result = [...visitorWorkOrders, ...workOrdersSlice];
+    } else if (activePage === "Upcoming reservations") {
+      // Created reservations first (status Upcoming on this page), then the original placeholder tile (first work order)
+      const reservationWorkOrders = createdReservationsList.map((r) => ({ ...createdReservationToWorkOrder(r), status: "Upcoming" as const }));
+      const originalPlaceholder = workOrdersList.slice(0, 1);
+      result = [...reservationWorkOrders, ...originalPlaceholder];
+    } else {
+      result = [...workOrdersList];
     }
-    // For reservations page, show only 1 card
-    if (activePage === "Upcoming reservations") {
-      result = result.slice(0, 1);
-    }
-    // For create reservation page, show only 1 card
+
+    // For create reservation page, show only Sand and Sky Room tiles (2 cards)
     if (activePage === "Create reservation") {
       // Show only Sand and Sky Room tiles
       result = result.slice(0, 2);
@@ -3350,6 +3561,54 @@ function DashboardPage({
 
     return result;
   })();
+
+  // Visitor data for Upcoming visits (tiles + table): created visitors use real data, work orders use synthetic
+  const randomNames = ["Sarah Mitchell", "James Anderson", "Emily Chen", "Michael Rodriguez", "Jessica Taylor", "David Kim"];
+  const workOrdersSliceForVisitors = workOrdersList.slice(0, 2);
+  const visitorDataForVisitors = activePage === "Upcoming visits"
+    ? filteredAndSortedWorkOrders.map((wo) => {
+        if (wo.id.startsWith("V-")) {
+          const v = createdVisitorsList.find((c) => c.id === wo.id);
+          return v
+            ? { visitorName: v.visitorName, hostName: v.hostName, visitorBadges: v.visitorBadges, time: v.time }
+            : { visitorName: "Guest", hostName: "", visitorBadges: { first: "First Visit", second: "Scheduled" }, time: "9:00 AM - 5:00 PM" };
+        }
+        const idx = workOrdersSliceForVisitors.findIndex((w) => w.id === wo.id);
+        return {
+          visitorName: randomNames[idx % randomNames.length],
+          hostName: "John Doe",
+          visitorBadges: idx === 0 ? { first: "First Visit", second: "Checked In" } : { first: "First Visit", second: "Scheduled" },
+          time: "9:00 AM - 5:00 PM",
+        };
+      })
+    : undefined;
+
+  // Reservation data for Upcoming reservations (tiles + table): created reservations use real data
+  const reservationDataForReservations = activePage === "Upcoming reservations"
+    ? filteredAndSortedWorkOrders.map((wo) => {
+        if (wo.id.startsWith("R-")) {
+          const r = createdReservationsList.find((c) => c.id === wo.id);
+          if (r) {
+            const floorMatch = r.location.match(/Floor\s*(\d+)/i);
+            return {
+              floor: floorMatch ? floorMatch[1] : "—",
+              suite: r.roomName,
+              date: r.date,
+              time: r.timeSlot,
+            };
+          }
+        }
+        const today = new Date();
+        const yesterday = new Date(today);
+        yesterday.setDate(today.getDate() - 1);
+        return {
+          floor: "1",
+          suite: "Conference Room 201",
+          date: yesterday.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
+          time: "All Day",
+        };
+      })
+    : undefined;
 
   return (
     <>
@@ -3450,6 +3709,13 @@ function DashboardPage({
                 <DropdownMenuItem variant="destructive">
                   <MaterialSymbol name="logout" size={16} className="mr-2" />
                   Sign out
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={() => resetApp()}
+                >
+                  <MaterialSymbol name="restart_alt" size={16} className="mr-2" />
+                  Reset App
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -4987,30 +5253,14 @@ function DashboardPage({
                       }}
                     >
                       {filteredAndSortedWorkOrders.map((workOrder, index) => {
-                        const visitorBadges = activePage === "Upcoming visits" 
-                          ? index === 0 
-                            ? { first: "First Visit", second: "Checked In" }
-                            : { first: "First Visit", second: "Scheduled" }
-                          : undefined;
+                        const visitorInfo = activePage === "Upcoming visits" ? visitorDataForVisitors?.[index] : undefined;
+                        const visitorBadges = visitorInfo?.visitorBadges;
+                        const visitorName = visitorInfo?.visitorName;
+                        const hostName = visitorInfo?.hostName;
                         
-                        // Generate random names for visitor cards
-                        const randomNames = ["Sarah Mitchell", "James Anderson", "Emily Chen", "Michael Rodriguez", "Jessica Taylor", "David Kim"];
-                        const visitorName = activePage === "Upcoming visits" ? randomNames[index] : undefined;
-                        const hostName = activePage === "Upcoming visits" ? "John Doe" : undefined;
-                        
-                        // Reservation data for reservations page
-                        const reservationData = activePage === "Upcoming reservations" && index === 0
-                          ? (() => {
-                              const today = new Date();
-                              const futureDate = new Date(today);
-                              futureDate.setDate(today.getDate() + 2);
-                              return {
-                                floor: "4",
-                                suite: "Conference Room 201",
-                                date: futureDate.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
-                                time: "All Day"
-                              };
-                            })()
+                        // Reservation data for reservations page (from reservationDataForReservations when on Upcoming reservations)
+                        const reservationData = activePage === "Upcoming reservations"
+                          ? reservationDataForReservations?.[index]
                           : undefined;
                         
                         // Render ReservationTile for Create reservation page
@@ -5047,7 +5297,7 @@ function DashboardPage({
                               roomName: "Sand Room",
                               date: selectedDate,
                               timeSlot: selectedTimeSlot,
-                              location: "Floor 10 - 1 Main St, Boston, MA",
+                              location: "Floor 1 - 1 Main St, Boston, MA",
                               capacity: 10,
                               price: "US$35.00"
                             },
@@ -5101,21 +5351,42 @@ function DashboardPage({
                         
                         // Use ReservationCard for reservations, WorkOrderCard for others
                         if (activePage === "Upcoming reservations") {
+                          const createdRes = workOrder.id.startsWith("R-")
+                            ? createdReservationsList.find((c) => c.id === workOrder.id)
+                            : null;
                           return (
                             <ReservationCard 
-                              key={index} 
+                              key={workOrder.id} 
                               workOrder={workOrder} 
                               reservationData={reservationData}
+                              resourceNameOverride={createdRes ? createdRes.roomName : "Sand Room"}
+                              statusOverride={createdRes ? undefined : "Past"}
+                              descriptionOverride={createdRes ? undefined : RESERVATION_PLACEHOLDER_DESCRIPTION}
+                              fixedHeight={332}
                               onClick={() => {
-                                setSelectedReservationForView({
-                                  roomName: "Sand Room",
-                                  reservationName: "All Day event",
-                                  date: reservationData?.date ?? workOrder.created,
-                                  timeSlot: reservationData?.time ?? "All Day",
-                                  location: workOrder.property ?? "1 Main St",
-                                  capacity: 8,
-                                  price: "$0"
-                                });
+                                if (createdRes) {
+                                  setSelectedReservationForView({
+                                    roomName: createdRes.roomName,
+                                    reservationName: createdRes.reservationName ?? createdRes.roomName,
+                                    date: createdRes.date,
+                                    timeSlot: createdRes.timeSlot,
+                                    location: createdRes.location,
+                                    capacity: createdRes.capacity,
+                                    price: createdRes.price,
+                                    description: createdRes.reservationDetails || RESERVATION_PLACEHOLDER_DESCRIPTION
+                                  });
+                                } else {
+                                  setSelectedReservationForView({
+                                    roomName: "Sand Room",
+                                    reservationName: "All Day event",
+                                    date: reservationData?.date ?? workOrder.created,
+                                    timeSlot: reservationData?.time ?? "All Day",
+                                    location: workOrder.property ?? "1 Main St",
+                                    capacity: 8,
+                                    price: "$0",
+                                    description: RESERVATION_PLACEHOLDER_DESCRIPTION
+                                  });
+                                }
                                 setIsViewReservationModalOpen(true);
                               }}
                             />
@@ -5130,10 +5401,21 @@ function DashboardPage({
                               visitorBadges={activePage === "Upcoming visits" ? visitorBadges : undefined}
                               visitorName={activePage === "Upcoming visits" ? visitorName : undefined}
                               hostName={activePage === "Upcoming visits" ? hostName : undefined}
+                              visitorTime={activePage === "Upcoming visits" ? visitorDataForVisitors?.[index]?.time : undefined}
                               cardIndex={index}
                               isEmpty={false}
-                              onVisitorCardClick={activePage === "Upcoming visits" ? (wo) => { setSelectedViewVisitorCreated(wo.created); setIsViewVisitorModalOpen(true); } : undefined}
-                              fixedHeight={workOrder.id === lastCreatedWorkOrderId ? 322 : undefined}
+                              onVisitorCardClick={activePage === "Upcoming visits" ? (wo) => {
+                                if (wo.id.startsWith("V-")) {
+                                  const v = createdVisitorsList.find((c) => c.id === wo.id);
+                                  setSelectedViewVisitor(v ?? null);
+                                  setSelectedViewVisitorCreated(wo.created);
+                                } else {
+                                  setSelectedViewVisitor(null);
+                                  setSelectedViewVisitorCreated(wo.created);
+                                }
+                                setIsViewVisitorModalOpen(true);
+                              } : undefined}
+                              fixedHeight={activePage === "Upcoming visits" && workOrder.id === lastCreatedVisitorId ? 214 : activePage !== "Upcoming visits" && workOrder.id === lastCreatedWorkOrderId ? 322 : undefined}
                             />
                           </div>
                         );
@@ -5142,18 +5424,6 @@ function DashboardPage({
                   </div>
                 ) : (
                   (() => {
-                    // Generate visitor data for table
-                    const randomNames = ["Sarah Mitchell", "James Anderson", "Emily Chen", "Michael Rodriguez", "Jessica Taylor", "David Kim"];
-                    const visitorData = activePage === "Upcoming visits" 
-                      ? filteredAndSortedWorkOrders.map((_, index) => ({
-                          visitorName: randomNames[index % randomNames.length],
-                          hostName: "John Doe",
-                          visitorBadges: index === 0 
-                            ? { first: "First Visit", second: "Checked In" }
-                            : { first: "First Visit", second: "Scheduled" }
-                        }))
-                      : undefined;
-
                     return (
                       <WorkOrdersTable 
                         workOrders={filteredAndSortedWorkOrders} 
@@ -5166,18 +5436,46 @@ function DashboardPage({
                         onPageChange={setCurrentPage}
                         onPageSizeChange={setPageSize}
                         activePage={activePage}
-                        visitorData={visitorData}
-                        onVisitorRowClick={activePage === "Upcoming visits" ? (wo) => { setSelectedViewVisitorCreated(wo.created); setIsViewVisitorModalOpen(true); } : undefined}
+                        visitorData={visitorDataForVisitors}
+                        createdReservationsList={activePage === "Upcoming reservations" ? createdReservationsList : undefined}
+                        onVisitorRowClick={activePage === "Upcoming visits" ? (wo) => {
+                          if (wo.id.startsWith("V-")) {
+                            const v = createdVisitorsList.find((c) => c.id === wo.id);
+                            setSelectedViewVisitor(v ?? null);
+                            setSelectedViewVisitorCreated(wo.created);
+                          } else {
+                            setSelectedViewVisitor(null);
+                            setSelectedViewVisitorCreated(wo.created);
+                          }
+                          setIsViewVisitorModalOpen(true);
+                        } : undefined}
                         onReservationRowClick={activePage === "Upcoming reservations" ? (wo) => {
-                          setSelectedReservationForView({
-                            roomName: "Sand Room",
-                            reservationName: "All Day event",
-                            date: wo.created,
-                            timeSlot: "All Day",
-                            location: wo.property ?? "1 Main St",
-                            capacity: 8,
-                            price: "$0"
-                          });
+                          const createdRes = wo.id.startsWith("R-")
+                            ? createdReservationsList.find((c) => c.id === wo.id)
+                            : null;
+                          if (createdRes) {
+                            setSelectedReservationForView({
+                              roomName: createdRes.roomName,
+                              reservationName: createdRes.reservationName ?? createdRes.roomName,
+                              date: createdRes.date,
+                              timeSlot: createdRes.timeSlot,
+                              location: createdRes.location,
+                              capacity: createdRes.capacity,
+                              price: createdRes.price,
+                              description: createdRes.reservationDetails || RESERVATION_PLACEHOLDER_DESCRIPTION
+                            });
+                          } else {
+                            setSelectedReservationForView({
+                              roomName: "Sand Room",
+                              reservationName: "All Day event",
+                              date: wo.created,
+                              timeSlot: "All Day",
+                              location: wo.property ?? "1 Main St",
+                              capacity: 8,
+                              price: "$0",
+                              description: RESERVATION_PLACEHOLDER_DESCRIPTION
+                            });
+                          }
                           setIsViewReservationModalOpen(true);
                         } : undefined}
                       />
@@ -5635,6 +5933,27 @@ function DashboardPage({
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                 <h3 className="text-lg font-medium text-muted-foreground">Reservation details</h3>
                 
+                <div className="space-y-2" data-validation-field="reservationName">
+                  <Label htmlFor="reservation-name">
+                    <span style={{ color: 'var(--destructive-foreground)' }}>*</span>{" "}Reservation name
+                  </Label>
+                  <Input
+                    id="reservation-name"
+                    placeholder="Enter reservation name"
+                    value={reservationName}
+                    onChange={(e) => {
+                      setReservationName(e.target.value);
+                      if (validationErrors.reservationName && e.target.value.trim()) {
+                        setValidationErrors(prev => ({ ...prev, reservationName: false }));
+                      }
+                    }}
+                    className={validationErrors.reservationName ? 'focus-visible:ring-destructive focus-visible:ring-destructive/50' : ''}
+                    style={validationErrors.reservationName ? { borderColor: 'var(--color-semantic-stroke-rag-danger-default)', borderWidth: '1px' } : undefined}
+                    aria-invalid={validationErrors.reservationName ? true : undefined}
+                    required
+                  />
+                </div>
+
                 <div className="space-y-2" data-validation-field="visitDateStart">
                   <Label>
                     <span style={{ color: 'var(--destructive-foreground)' }}>*</span>{" "}Date & Time
@@ -5779,9 +6098,7 @@ function DashboardPage({
                 </div>
 
                 <div className="space-y-2" data-validation-field="reservationDetails">
-                  <Label htmlFor="reservation-details">
-                    <span style={{ color: 'var(--destructive-foreground)' }}>*</span>{" "}Details
-                  </Label>
+                  <Label htmlFor="reservation-details">Details</Label>
                   <Textarea 
                     id="reservation-details"
                     placeholder="Provide further details for the reservation"
@@ -5795,7 +6112,6 @@ function DashboardPage({
                         setValidationErrors(prev => ({ ...prev, reservationDetails: false }));
                       }
                     }}
-                    required
                   />
                 </div>
               </div>
@@ -5883,8 +6199,136 @@ function DashboardPage({
               </div>
             )}
 
-            {/* Requester information section */}
-            {isEditDetailsMode && (
+            {/* Visit location & host – visitor modal only (matches Property, Floor, Company, Host badges) */}
+            {isEditDetailsMode && modalType === "visitor" && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <h3 className="text-lg font-medium text-muted-foreground">Visit location & host</h3>
+                
+                <div className="space-y-2" data-validation-field="property">
+                  <Label htmlFor="visitor-edit-property">
+                    <span style={{ color: 'var(--destructive-foreground)' }}>*</span>{" "}Property
+                  </Label>
+                  <Select 
+                    value={property} 
+                    onValueChange={(value) => {
+                      setProperty(value);
+                      if (validationErrors.property && value.trim()) {
+                        setValidationErrors(prev => ({ ...prev, property: false }));
+                      }
+                    }}
+                  >
+                    <SelectTrigger 
+                      id="visitor-edit-property" 
+                      className={validationErrors.property ? 'focus-visible:ring-destructive focus-visible:ring-destructive/50' : ''}
+                      style={validationErrors.property ? { borderColor: 'var(--color-semantic-stroke-rag-danger-default)', borderWidth: '1px' } : undefined}
+                      aria-invalid={validationErrors.property ? true : undefined}
+                    >
+                      <SelectValue placeholder="Select property" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {propertyOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2" data-validation-field="floor">
+                  <Label htmlFor="visitor-edit-floor">
+                    <span style={{ color: 'var(--destructive-foreground)' }}>*</span>{" "}Floor
+                  </Label>
+                  <Select
+                    value={floor}
+                    onValueChange={(value) => {
+                      setFloor(value);
+                      if (validationErrors.floor && value.trim()) {
+                        setValidationErrors(prev => ({ ...prev, floor: false }));
+                      }
+                    }}
+                  >
+                    <SelectTrigger 
+                      id="visitor-edit-floor" 
+                      className={validationErrors.floor ? 'focus-visible:ring-destructive focus-visible:ring-destructive/50' : ''}
+                      style={validationErrors.floor ? { borderColor: 'var(--color-semantic-stroke-rag-danger-default)', borderWidth: '1px' } : undefined}
+                      aria-invalid={validationErrors.floor ? true : undefined}
+                    >
+                      <SelectValue placeholder="Select floor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {floorOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2" data-validation-field="company">
+                  <Label htmlFor="visitor-edit-company">
+                    <span style={{ color: 'var(--destructive-foreground)' }}>*</span>{" "}Company
+                  </Label>
+                  <Select 
+                    value={company} 
+                    onValueChange={(value) => {
+                      setCompany(value);
+                      if (validationErrors.company && value.trim()) {
+                        setValidationErrors(prev => ({ ...prev, company: false }));
+                      }
+                    }}
+                  >
+                    <SelectTrigger 
+                      id="visitor-edit-company" 
+                      className={validationErrors.company ? 'focus-visible:ring-destructive focus-visible:ring-destructive/50' : ''}
+                      style={validationErrors.company ? { borderColor: 'var(--color-semantic-stroke-rag-danger-default)', borderWidth: '1px' } : undefined}
+                      aria-invalid={validationErrors.company ? true : undefined}
+                    >
+                      <SelectValue placeholder="Select company" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {companyOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2" data-validation-field="requestedFor">
+                  <Label htmlFor="visitor-edit-host">
+                    <span style={{ color: 'var(--destructive-foreground)' }}>*</span>{" "}Host
+                  </Label>
+                  <Select
+                    value={requestedFor}
+                    onValueChange={(value) => {
+                      setRequestedFor(value);
+                      if (validationErrors.requestedFor && value.trim()) {
+                        setValidationErrors(prev => ({ ...prev, requestedFor: false }));
+                      }
+                    }}
+                  >
+                    <SelectTrigger 
+                      id="visitor-edit-host" 
+                      className={validationErrors.requestedFor ? 'focus-visible:ring-destructive focus-visible:ring-destructive/50' : ''}
+                      style={validationErrors.requestedFor ? { borderColor: 'var(--color-semantic-stroke-rag-danger-default)', borderWidth: '1px' } : undefined}
+                      aria-invalid={validationErrors.requestedFor ? true : undefined}
+                    >
+                      <SelectValue placeholder="Select host" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {requestedForFormOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            {/* Requester information section – work order modal only */}
+            {isEditDetailsMode && modalType === "work-order" && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                 <h3 className="text-lg font-medium text-muted-foreground">Requester information</h3>
                 
@@ -5920,7 +6364,7 @@ function DashboardPage({
                 </div>
                 <div className="space-y-2" data-validation-field="requestedFor">
                   <Label htmlFor="requested-for">
-                    <span style={{ color: 'var(--destructive-foreground)' }}>*</span>{" "}{modalType === "visitor" ? "Created for" : "Requested For"}
+                    <span style={{ color: 'var(--destructive-foreground)' }}>*</span>{" "}Requested For
                   </Label>
                   <Select
                     value={requestedFor}
@@ -5986,7 +6430,24 @@ function DashboardPage({
                       errors.visitTimeEnd = true;
                     }
                   }
+                  if (isEditDetailsMode) {
+                    if (!property.trim()) {
+                      errors.property = true;
+                    }
+                    if (!floor.trim()) {
+                      errors.floor = true;
+                    }
+                    if (!company.trim()) {
+                      errors.company = true;
+                    }
+                    if (!requestedFor.trim()) {
+                      errors.requestedFor = true;
+                    }
+                  }
                 } else if (modalType === "reservation") {
+                  if (!reservationName.trim()) {
+                    errors.reservationName = true;
+                  }
                   if (!visitDateStart.trim()) {
                     errors.visitDateStart = true;
                   }
@@ -6000,9 +6461,6 @@ function DashboardPage({
                     if (!visitTimeEnd.trim()) {
                       errors.visitTimeEnd = true;
                     }
-                  }
-                  if (!reservationDetails.trim()) {
-                    errors.reservationDetails = true;
                   }
                 } else {
                   if (!issueType.trim()) {
@@ -6030,7 +6488,7 @@ function DashboardPage({
                 
                 setValidationErrors(errors);
                 
-                // Only close modal and add work order if no errors (work-order modal only)
+                // Only close modal and add entity if no errors
                 if (Object.keys(errors).length === 0) {
                   if (modalType === "work-order") {
                     // Generate new ID from max existing (e.g. W-11631-000047 -> 47, next 48)
@@ -6064,16 +6522,59 @@ function DashboardPage({
                     };
                     setWorkOrdersList((prev) => [newWorkOrder, ...prev]);
                     setLastCreatedWorkOrderId(newWorkOrder.id);
-                    // Persist so detail page can show newly created work orders
-                    try {
-                      const key = "alize-created-work-orders";
-                      const raw = typeof sessionStorage !== "undefined" ? sessionStorage.getItem(key) : null;
-                      const list: WorkOrderItem[] = raw ? JSON.parse(raw) : [];
-                      list.unshift(newWorkOrder);
-                      sessionStorage.setItem(key, JSON.stringify(list));
-                    } catch {
-                      // ignore
-                    }
+                  } else if (modalType === "visitor") {
+                    const visitorId = "V-" + Date.now();
+                    const dateDisplay = visitDateStart
+                      ? (() => {
+                          const [y, m, d] = visitDateStart.split("-");
+                          return `${m}/${d}/${y}`;
+                        })()
+                      : formatDate(new Date());
+                    const timeDisplay = allDay
+                      ? "All Day"
+                      : `${formatTimeUS(visitTimeStart)} - ${formatTimeUS(visitTimeEnd)}`;
+                    const newVisitor: CreatedVisitorItem = {
+                      id: visitorId,
+                      created: dateDisplay,
+                      visitorName: `${visitorFirstName.trim()} ${visitorLastName.trim()}`.trim() || "Guest",
+                      hostName: requestedFor.trim() || "John Doe",
+                      visitorBadges: { first: "First Visit", second: "Scheduled" },
+                      date: dateDisplay,
+                      time: timeDisplay,
+                      property: property.trim() || "1 Main St",
+                      email: visitorEmail.trim() || "",
+                      phone: visitorPhone.trim() || "",
+                    };
+                    setCreatedVisitorsList((prev) => [newVisitor, ...prev]);
+                    setLastCreatedVisitorId(visitorId);
+                  } else if (modalType === "reservation" && selectedReservation) {
+                    const reservationId = "R-" + Date.now();
+                    const dateDisplay = visitDateStart
+                      ? (() => {
+                          const [y, m, d] = visitDateStart.split("-");
+                          return `${m}/${d}/${y}`;
+                        })()
+                      : formatDate(new Date());
+                    const timeDisplay = allDay
+                      ? "All Day"
+                      : `${formatTimeUS(visitTimeStart)} - ${formatTimeUS(visitTimeEnd)}`;
+                    const newReservation: CreatedReservationItem = {
+                      id: reservationId,
+                      reservationName: reservationName.trim(),
+                      roomName: selectedReservation.roomName,
+                      date: dateDisplay,
+                      timeSlot: timeDisplay,
+                      location: selectedReservation.location,
+                      capacity: selectedReservation.capacity,
+                      price: selectedReservation.price,
+                      created: dateDisplay,
+                      property: property.trim() || selectedReservation.location || "1 Main St",
+                      reservationDetails: reservationDetails.trim() || "-",
+                    };
+                    setCreatedReservationsList((prev) => [newReservation, ...prev]);
+                    setLastCreatedReservationId(reservationId);
+                    setActivePage("Upcoming reservations");
+                    router.replace(`/dashboard?page=${encodeURIComponent("Upcoming reservations")}`);
                   }
                   setIsCreateModalOpen(false);
                   resetModalToDefault();
@@ -6099,7 +6600,7 @@ function DashboardPage({
       </Dialog>
 
       {/* View visitor Modal */}
-      <Dialog open={isViewVisitorModalOpen} onOpenChange={(open) => { setIsViewVisitorModalOpen(open); if (!open) setSelectedViewVisitorCreated(null); }}>
+      <Dialog open={isViewVisitorModalOpen} onOpenChange={(open) => { setIsViewVisitorModalOpen(open); if (!open) { setSelectedViewVisitorCreated(null); setSelectedViewVisitor(null); } }}>
         <DialogContent
           className="sm:max-w-[590px] w-[590px] max-h-[calc(100vh-112px)] h-[calc(100vh-112px)] my-[56px] flex flex-col p-0 gap-0"
           style={{ maxHeight: 'calc(100vh - 112px)', height: 'calc(100vh - 112px)', maxWidth: '590px', width: '590px', overflow: 'hidden' }}
@@ -6119,39 +6620,43 @@ function DashboardPage({
           </DialogHeader>
           <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 px-6 py-6 flex flex-col items-start gap-6">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge tonal="science">First Visit</Badge>
-              <Badge variant="default">Checked In</Badge>
+              <Badge tonal="science">{selectedViewVisitor?.visitorBadges.first ?? "First Visit"}</Badge>
+              <Badge variant="default">{selectedViewVisitor?.visitorBadges.second ?? "Checked In"}</Badge>
             </div>
             <div className="flex items-start gap-3">
               <Avatar size="lg">
-                <AvatarFallback>SM</AvatarFallback>
+                <AvatarFallback>
+                  {selectedViewVisitor?.visitorName
+                    ? selectedViewVisitor.visitorName.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)
+                    : "SM"}
+                </AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0">
                 <p className="text-xs text-muted-foreground uppercase tracking-wider">Guest</p>
-                <h3 className="font-semibold text-base">Sarah Mitchell</h3>
+                <h3 className="font-semibold text-base">{selectedViewVisitor?.visitorName ?? "Sarah Mitchell"}</h3>
               </div>
             </div>
             <Separator />
             <div className="grid grid-cols-2 gap-4 w-full">
               <div>
                 <p className="text-xs text-muted-foreground">Date</p>
-                <p className="text-sm font-medium">{selectedViewVisitorCreated ?? formatDate(new Date())}</p>
+                <p className="text-sm font-medium">{selectedViewVisitor?.date ?? selectedViewVisitorCreated ?? formatDate(new Date())}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Time</p>
-                <p className="text-sm font-medium">9:00 AM - 5:00 PM</p>
+                <p className="text-sm font-medium">{selectedViewVisitor?.time ?? "9:00 AM - 5:00 PM"}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Email</p>
-                <p className="text-sm font-medium">sarah.mitchell@example.com</p>
+                <p className="text-sm font-medium">{selectedViewVisitor?.email || "sarah.mitchell@example.com"}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Phone</p>
-                <p className="text-sm font-medium">+1 555-0123</p>
+                <p className="text-sm font-medium">{selectedViewVisitor?.phone || "+1 555-0123"}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Property</p>
-                <p className="text-sm font-normal text-semantic-text-interaction-default underline cursor-pointer hover:underline">1 Main St</p>
+                <p className="text-sm font-normal text-semantic-text-interaction-default underline cursor-pointer hover:underline">{selectedViewVisitor?.property ?? "1 Main St"}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Floor</p>
@@ -6163,7 +6668,7 @@ function DashboardPage({
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Host</p>
-                <p className="text-sm font-normal text-semantic-text-interaction-default underline cursor-pointer hover:underline">John Doe</p>
+                <p className="text-sm font-normal text-semantic-text-interaction-default underline cursor-pointer hover:underline">{selectedViewVisitor?.hostName ?? "John Doe"}</p>
               </div>
             </div>
             <Accordion type="single" collapsible defaultValue="additional-info" className="w-full">
@@ -6266,7 +6771,7 @@ function DashboardPage({
                 <div className="w-full">
                   <p className="text-xs text-muted-foreground">Description</p>
                   <p className="text-sm text-foreground line-clamp-3 mt-0.5">
-                    Business meeting to discuss quarterly strategy, review performance metrics, and plan upcoming initiatives with key stakeholders.
+                    {selectedReservationForView.description ?? RESERVATION_PLACEHOLDER_DESCRIPTION}
                   </p>
                 </div>
                 <Separator className="w-full" />
