@@ -2553,18 +2553,9 @@ function DashboardPage({
   searchParams: ReturnType<typeof useSearchParams>;
 }) {
   const router = useRouter();
-  // Work orders list (tiles + table) – persisted so new entries survive refresh
-  const [workOrdersList, setWorkOrdersList] = useState<WorkOrderItem[]>(() => {
-    if (typeof window === "undefined") return initialWorkOrders;
-    try {
-      const raw = localStorage.getItem(ALIZE_WORK_ORDERS_KEY);
-      if (!raw) return initialWorkOrders;
-      const parsed = JSON.parse(raw) as WorkOrderItem[];
-      return Array.isArray(parsed) && parsed.length > 0 ? parsed : initialWorkOrders;
-    } catch {
-      return initialWorkOrders;
-    }
-  });
+  // Work orders list (tiles + table) – persisted so new entries survive refresh.
+  // Initial state is always default (no localStorage in initializer) so server and client first paint match (avoids hydration mismatch on Vercel); we load from localStorage in useEffect after mount.
+  const [workOrdersList, setWorkOrdersList] = useState<WorkOrderItem[]>(initialWorkOrders);
   const [lastCreatedWorkOrderId, setLastCreatedWorkOrderId] = useState<string | null>(null);
   const [lastCreatedVisitorId, setLastCreatedVisitorId] = useState<string | null>(null);
 
@@ -2578,16 +2569,8 @@ function DashboardPage({
     }
   }, [workOrdersList]);
 
-  // Created visitors (Upcoming visits) – persisted so new entries survive refresh
-  const [createdVisitorsList, setCreatedVisitorsList] = useState<CreatedVisitorItem[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const raw = localStorage.getItem(ALIZE_VISITORS_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
+  // Created visitors (Upcoming visits) – persisted so new entries survive refresh. Same hydration-safe init as work orders.
+  const [createdVisitorsList, setCreatedVisitorsList] = useState<CreatedVisitorItem[]>([]);
 
   useEffect(() => {
     try {
@@ -2599,16 +2582,8 @@ function DashboardPage({
     }
   }, [createdVisitorsList]);
 
-  // Created reservations (Resource Reservations schedule) – persisted so new entries survive refresh
-  const [createdReservationsList, setCreatedReservationsList] = useState<CreatedReservationItem[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const raw = localStorage.getItem(ALIZE_RESERVATIONS_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
+  // Created reservations (Resource Reservations schedule) – persisted so new entries survive refresh. Same hydration-safe init.
+  const [createdReservationsList, setCreatedReservationsList] = useState<CreatedReservationItem[]>([]);
   const [lastCreatedReservationId, setLastCreatedReservationId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -2620,6 +2595,32 @@ function DashboardPage({
       // ignore
     }
   }, [createdReservationsList]);
+
+  // Load persisted entities from localStorage after mount (client-only). Keeps server and client first render identical so tile height and layout hydrate correctly on Vercel.
+  const hasLoadedPersistedRef = useRef(false);
+  useEffect(() => {
+    if (hasLoadedPersistedRef.current || typeof window === "undefined") return;
+    hasLoadedPersistedRef.current = true;
+    try {
+      const rawWo = localStorage.getItem(ALIZE_WORK_ORDERS_KEY);
+      if (rawWo) {
+        const parsed = JSON.parse(rawWo) as WorkOrderItem[];
+        if (Array.isArray(parsed) && parsed.length > 0) setWorkOrdersList(parsed);
+      }
+      const rawVis = localStorage.getItem(ALIZE_VISITORS_KEY);
+      if (rawVis) {
+        const parsed = JSON.parse(rawVis) as CreatedVisitorItem[];
+        if (Array.isArray(parsed)) setCreatedVisitorsList(parsed);
+      }
+      const rawRes = localStorage.getItem(ALIZE_RESERVATIONS_KEY);
+      if (rawRes) {
+        const parsed = JSON.parse(rawRes) as CreatedReservationItem[];
+        if (Array.isArray(parsed)) setCreatedReservationsList(parsed);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // Modal state for Create Work Order
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -5425,7 +5426,7 @@ function DashboardPage({
                                 }
                                 setIsViewVisitorModalOpen(true);
                               } : undefined}
-                              fixedHeight={activePage === "Upcoming visits" && workOrder.id === lastCreatedVisitorId ? 214 : activePage !== "Upcoming visits" && (workOrder.createdViaModal === true || workOrder.id === lastCreatedWorkOrderId) ? 322 : undefined}
+                              fixedHeight={activePage === "Upcoming visits" && workOrder.id.startsWith("V-") ? 214 : activePage !== "Upcoming visits" && (workOrder.createdViaModal === true || workOrder.id === lastCreatedWorkOrderId) ? 322 : undefined}
                             />
                           </div>
                         );
