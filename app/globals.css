@@ -1,0 +1,137 @@
+/* Floating filter sheet styles */
+.floating-filter-sheet {
+  top: auto !important;
+  right: 20px !important;
+  bottom: 20px !important;
+  height: 769px !important;
+  max-height: calc(100vh - 40px) !important;
+  border-radius: 12px !important;
+  border: 1px solid var(--semantic-stroke-subdued) !important;
+}
+
+/* Hide overlay for floating sheet by targeting the overlay sibling */
+[data-slot="sheet-portal"]:has(.floating-filter-sheet) > [data-slot="sheet-overlay"],
+[data-slot="sheet-portal"]:has(.floating-filter-sheet) [data-slot="sheet-overlay"] {
+  display: none !important;
+}
+
+/* Sheet overlay transparency */
+[data-slot="sheet-overlay"] {
+  opacity: 0 !important;
+}
+
+/* Scroll container for grouped combobox */
+.scroll-container {
+  height: 140px !important;
+  max-height: 140px !important;
+  overflow-y: scroll !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+
+.scroll-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scroll-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll-container::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.scroll-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* Override border color for form fields with aria-invalid */
+textarea[aria-invalid="true"],
+input[aria-invalid="true"],
+select[aria-invalid="true"],
+button[aria-invalid="true"],
+[role="combobox"][aria-invalid="true"] {
+  border-color: var(--color-semantic-stroke-rag-danger-default) !important;
+}
+
+/* Ensure selected values in Select components use normal text color (not muted) */
+/* Target SelectValue when it's not showing placeholder (has a selected value) */
+button[data-slot="select-trigger"] [data-slot="select-value"]:not([data-placeholder]),
+[data-slot="select-trigger"] [data-slot="select-value"]:not([data-placeholder]) {
+  color: inherit !important;
+}
+
+/* Override text-muted-foreground class within SelectTrigger when value is selected */
+button[data-slot="select-trigger"]:has([data-slot="select-value"]:not([data-placeholder])) [data-slot="select-value"],
+button[data-slot="select-trigger"]:has([data-slot="select-value"]:not([data-placeholder])) .text-muted-foreground {
+  color: inherit !important;
+}
+
+/* Ensure GroupedCombobox selected text uses normal color */
+button[role="combobox"] span:not(.text-muted-foreground) {
+  color: inherit;
+}
+
+/* Override Button outline variant color to use semantic text default */
+/* Targets Button with variant="outline" and role="combobox" used in GroupedCombobox */
+button.inline-flex.text-semantic-text-subdued[role="combobox"][data-slot="popover-trigger"],
+button.inline-flex.text-semantic-text-subdued[role="combobox"] {
+  color: var(--color-semantic-text-default) !important;
+}
+
+/* Top navigation header uses Alize background token via bg-background class */
+
+/* Page transition animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* History card (work order detail): ensure overlay background on Card root (div.text-card-foreground) */
+[data-slot="card"].overflow-hidden.border-semantic-stroke-subdued {
+  background-color: var(--color-semantic-surface-overlays-level1);
+}
+
+/* CardContent inner div: add bottom margin (browser preview override) */
+[data-slot="card-content"].px-6 {
+  margin-bottom: 32px;
+}
+
+/* Hero card DataList: allow subtitle (second line) text to wrap instead of truncate */
+.hero-datalist-wrap {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+.hero-datalist-wrap .truncate {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+/* Hide scrollbar while maintaining scroll functionality */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari and Opera */
+}
+
+/* Remove top and bottom padding from Empty components in 2nd section cards */
+.scrollbar-hide [data-slot="empty"] {
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
